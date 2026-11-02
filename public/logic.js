@@ -88,7 +88,14 @@
     if (ind < 31) return ind === 30 ? 27 : ind + 1;
     return ind === 33 ? 31 : ind + 1;
   };
-  const HAN_PTS = (han) => (han >= 13 ? 32000 : han >= 11 ? 24000 : han >= 8 ? 16000 : han >= 6 ? 12000 : han >= 5 ? 8000 : [0, 1000, 2000, 3900, 7700][han]);
+  // 기본점: 5판 이상은 한도(만관 2000 · 하네만 3000 · 배만 4000 · 삼배만 6000), 역만 8000, 그 밖에는 부수 x 2^(판+2) (1900 넘으면 2000)
+  const baseOf = (han, fu, yakuman) => {
+    if (yakuman) return 8000 * yakuman;
+    if (han >= 11) return 6000; if (han >= 8) return 4000; if (han >= 6) return 3000; if (han >= 5) return 2000;
+    const b = fu * Math.pow(2, han + 2);
+    return b > 1900 ? 2000 : b;
+  };
+  const HAN_PTS = baseOf;
   const up100 = (x) => Math.ceil(x / 100) * 100;
 
   // 한 가지 나눔에 대한 역 (부수 계산은 하지 않는다)
@@ -104,8 +111,13 @@
     if (all.every((t) => t < 27 && (t % 9 === 0 || t % 9 === 8))) yk.push('청노두');
     if (tris.filter((s) => s.t >= HAKU).length === 3) yk.push('대삼원');
     if (concealedTri === 4 && cx.menzen) yk.push('사암각');
-    if (yk.length) return { ys: [], yk };
-    if (cx.menzen && sets.every((s) => s.k === 'seq') && pair !== HAKU && pair !== HATSU && pair !== CHUN && pair !== cx.seat && pair !== cx.round && wait === 'ryanmen') ys.push(['핀후', 1]);
+    if (sets.filter((s) => s.kan).length === 4) yk.push('사깡즈');
+    const windTris = tris.filter((s) => s.t >= 27 && s.t < 31).length;
+    if (windTris === 4) yk.push('대사희'); else if (windTris === 3 && pair >= 27 && pair < 31) yk.push('소사희');
+    if (all.every((t) => [19, 20, 21, 23, 25, 32].includes(t))) yk.push('녹일색');
+    if (yk.length) return { ys: [], yk, fu: 0 };
+    let pinfu = false;
+    if (cx.menzen && sets.every((s) => s.k === 'seq') && pair !== HAKU && pair !== HATSU && pair !== CHUN && pair !== cx.seat && pair !== cx.round && wait === 'ryanmen') { ys.push(['핀후', 1]); pinfu = true; }
     if (all.every(isSimple)) ys.push(['탕야오', 1]);
     if (cx.menzen) {
       const key = {}; seqs.forEach((s) => { key[s.t] = (key[s.t] || 0) + 1; });
@@ -130,7 +142,18 @@
     }
     if (tris.filter((s) => s.t >= HAKU).length === 2 && pair >= HAKU) ys.push(['소삼원', 2]);
     flushYaku(cx, all, ys);
-    return { ys, yk };
+    return { ys, yk, fu: fuOf(cx, sets, pair, wait, pinfu) };
+  }
+  // 부수: 기본 20, 멘젠 론 +10, 쯔모 +2(핀후 제외), 커쯔·깡, 역패 머리 +2, 대기 +2, 문 연 핀후 모양은 30
+  function fuOf(cx, sets, pair, wait, pinfu) {
+    let fu = 20;
+    if (cx.menzen && !cx.tsumo) fu += 10;
+    if (cx.tsumo && !pinfu) fu += 2;
+    for (const s of sets) if (s.k === 'tri') { let f = isTerm(s.t) ? 4 : 2; if (s.kan) f *= 4; if (!s.open) f *= 2; fu += f; }
+    if (pair >= HAKU || pair === cx.seat || pair === cx.round) fu += 2;
+    if (wait === 'kanchan' || wait === 'penchan' || wait === 'tanki') fu += 2;
+    if (!cx.menzen && fu === 20) fu = 22;
+    return Math.ceil(fu / 10) * 10;
   }
   function flushYaku(cx, all, ys) {
     const suits = new Set(all.filter((t) => t < 27).map(suitOf));
@@ -139,8 +162,8 @@
     else if (suits.size === 1 && honors) ys.push(['혼일색', cx.menzen ? 3 : 2]);
   }
 
-  // 이 손패(멜드 포함)가 이기는 패 이외의 조건으로 얻는 최고 점수. 역이 없으면 null.
-  // melds: [{kind, tiles:[...], open:bool}], closed: 완성된 손패(멜드 제외) 개수 배열, tile: 이긴 패
+  // 이 손패(멜드 포함)로 이겼을 때 가장 높은 점수. 역이 없으면 null.
+  // melds: [{kind, tiles}], closed: 완성된 손패(멜드 제외) 개수 배열, tile: 이긴 패
   function scoreHand(cx, closed, melds, tile) {
     const nM = melds.length;
     const meldSets = melds.map((m) => ({ k: m.kind === 'chi' ? 'seq' : 'tri', t: m.tiles[0], open: m.kind !== 'ankan', kan: m.kind === 'minkan' || m.kind === 'ankan' }));
@@ -148,33 +171,42 @@
     closed.forEach((n, t) => { tileCount[t] += n; });
     melds.forEach((m) => m.tiles.forEach((t) => { tileCount[t]++; }));
     let best = null;
-    const consider = (ys, yk) => {
-      let han, names;
-      if (yk.length) { han = 13 * yk.length; names = yk.map((n) => [n, 13]); }
+    const consider = (ys, yk, fu) => {
+      if (cx.first && cx.tsumo && nM === 0) yk = yk.concat(cx.first === 'tenhou' ? ['천화'] : ['지화']);
+      let han, names, ymn = 0;
+      if (yk.length) { ymn = yk.length; han = 13 * ymn; names = yk.map((n) => [n, 13]); }
       else {
         const list = ys.slice();
-        if (cx.riichi) list.push(['리치', 1]);
+        if (cx.doubleRiichi) list.push(['더블 리치', 2]); else if (cx.riichi) list.push(['리치', 1]);
         if (cx.ippatsu) list.push(['일발', 1]);
         if (cx.tsumo && cx.menzen) list.push(['멘젠 쯔모', 1]);
         if (cx.rinshan) list.push(['영상개화', 1]);
+        if (cx.chankan) list.push(['창깡', 1]);
         if (cx.haitei) list.push(['해저로월', 1]);
         if (cx.houtei) list.push(['하저로어', 1]);
         if (!list.length) return;
         han = list.reduce((a, b) => a + b[1], 0); names = list;
       }
       const dora = cx.doras.reduce((a, d) => a + tileCount[d], 0), ura = cx.riichi ? cx.uras.reduce((a, d) => a + tileCount[d], 0) : 0;
-      if (!yk.length) { han += dora + ura; }
-      const r = { han, yaku: names, yakuman: yk.length > 0, dora: yk.length ? 0 : dora, ura: yk.length ? 0 : ura, pts: HAN_PTS(han) };
-      if (!best || r.pts > best.pts || (r.pts === best.pts && r.han > best.han)) best = r;
+      if (!ymn) han += dora + ura;
+      const r = { han, fu: ymn ? 0 : fu, yaku: names, yakuman: ymn, dora: ymn ? 0 : dora, ura: ymn ? 0 : ura, base: baseOf(han, fu, ymn) };
+      if (!best || r.base > best.base || (r.base === best.base && (r.han > best.han || (r.han === best.han && r.fu > best.fu)))) best = r;
     };
-    if (nM === 0 && isKokushi(closed)) consider([], ['국사무쌍']);
+    if (nM === 0 && isKokushi(closed)) consider([], ['국사무쌍'], 0);
+    if (nM === 0) {                                          // 구련보등: 한 무늬 1112345678999 + 한 장
+      for (let su = 0; su < 3; su++) {
+        const base = [3, 1, 1, 1, 1, 1, 1, 1, 3];
+        if (closed.every((n, t) => (t >= su * 9 && t < su * 9 + 9 ? n >= base[t - su * 9] : n === 0))) consider([], ['구련보등'], 0);
+      }
+    }
     if (nM === 0 && isChiitoi(closed)) {
       const ys = [['치또이츠', 2]], all = [];
       for (let t = 0; t < 34; t++) if (closed[t]) all.push(t, t);
       if (all.every(isSimple)) ys.push(['탕야오', 1]);
       if (all.every(isTerm) && all.some((t) => t < 27) && all.some(isHonor)) ys.push(['혼노두', 2]);
-      if (all.every(isHonor)) consider([], ['자일색']);
-      else { flushYaku(cx, all, ys); consider(ys, []); }
+      if (all.every(isHonor)) consider([], ['자일색'], 0);
+      else if (all.every((t) => t < 27 && (t % 9 === 0 || t % 9 === 8))) consider([], ['청노두'], 0);
+      else { flushYaku(cx, all, ys); consider(ys, [], 25); }
     }
     for (const d of decompose(closed, 4 - nM)) {
       // 이긴 패가 어디에 들어갔다고 볼 수 있는지 모두 시험 (론으로 완성된 삼조는 열린 것으로 침)
@@ -189,9 +221,9 @@
       });
       if (d.pair === tile) slots.push({ i: -1, wait: 'tanki' });
       for (const sl of slots) {
-        const sets = d.sets.map((s, i) => ({ k: s.k, t: s.t, open: !cx.tsumo && i === sl.i && s.k === 'tri' ? true : false, kan: false })).concat(meldSets);
+        const sets = d.sets.map((s, i) => ({ k: s.k, t: s.t, open: !cx.tsumo && i === sl.i && s.k === 'tri', kan: false })).concat(meldSets);
         const r = regularYaku(cx, sets, d.pair, sl.wait);
-        consider(r.ys, r.yk);
+        consider(r.ys, r.yk, r.fu);
       }
     }
     return best;
@@ -201,7 +233,7 @@
   function newGame(rand, opts = {}) {
     rand = rand || Math.random;
     const level = opts.level === 'easy' ? 'easy' : 'normal';
-    const st = { rand, level, hand: 0, scores: [25000, 25000, 25000, 25000], over: false, events: [], names: opts.names || ['나', '하나', '두리', '세나'], sticks: 0, results: [] };
+    const st = { rand, level, hand: 0, honba: 0, played: 0, scores: [25000, 25000, 25000, 25000], over: false, events: [], names: opts.names || ['나', '하나', '두리', '세나'], sticks: 0, results: [] };
     startHand(st);
     return st;
   }
@@ -216,7 +248,7 @@
     st.wall = tiles;
     st.melds = [[], [], [], []];
     st.rivers = [[], [], [], []];
-    st.riichi = [false, false, false, false]; st.ippatsu = [false, false, false, false];
+    st.riichi = [false, false, false, false]; st.ippatsu = [false, false, false, false]; st.doubleRiichi = [false, false, false, false]; st.anyCall = false; st.pendingKan = null;
     st.furiten = [false, false, false, false];             // 임시(내가 버릴 때까지) 후리텐
     st.riichiFuriten = [false, false, false, false];       // 리치 뒤 놓친 론(영구)
     st.doraCount = 1; st.kans = 0; st.rinshan = false; st.noDiscard = []; st.pendingRiichi = -1;
@@ -244,15 +276,16 @@
   }
 
   // ---------- 선택지 ----------
-  function winCtx(st, p, tsumo) {
-    return { menzen: isMenzen(st, p), tsumo, riichi: st.riichi[p], ippatsu: st.ippatsu[p], rinshan: tsumo && st.rinshan, haitei: tsumo && st.wall.length === 0 && !st.rinshan, houtei: !tsumo && st.wall.length === 0,
-      seat: seatWind(st, p), round: EAST, doras: doraTiles(st), uras: uraTiles(st) };
+  function winCtx(st, p, tsumo, extra) {
+    const first = tsumo && st.rivers[p].length === 0 && !st.anyCall ? (p === st.dealer ? 'tenhou' : 'chiihou') : null;
+    return Object.assign({ menzen: isMenzen(st, p), tsumo, riichi: st.riichi[p], doubleRiichi: st.doubleRiichi[p], ippatsu: st.ippatsu[p], rinshan: tsumo && st.rinshan, haitei: tsumo && st.wall.length === 0 && !st.rinshan, houtei: !tsumo && st.wall.length === 0 && !(extra && extra.chankan),
+      first, seat: seatWind(st, p), round: EAST, doras: doraTiles(st), uras: uraTiles(st) }, extra || {});
   }
-  function evalWin(st, p, tile, tsumo) {
+  function evalWin(st, p, tile, tsumo, extra) {
     const c = st.hands[p].slice();
     if (!tsumo) c[tile]++;
     if (!isAgari(c, st.melds[p].length)) return null;
-    return scoreHand(winCtx(st, p, tsumo), c, st.melds[p], tile);
+    return scoreHand(winCtx(st, p, tsumo, extra), c, st.melds[p], tile);
   }
   const waitsNow = (st, p, c) => waitsOf(c || st.hands[p].slice(), st.melds[p].length);
   const isFuriten = (st, p) => {
@@ -269,7 +302,7 @@
     if (st.drawn != null) o.tsumo = evalWin(st, p, st.drawn, true);
     for (let t = 0; t < 34; t++) if (c[t] > 0 && !st.noDiscard.includes(t)) o.discard.push(t);
     if (st.riichi[p]) { o.discard = st.drawn != null ? [st.drawn] : []; return o; }
-    if (isMenzen(st, p) && st.scores[p] >= 1000 && st.wall.length >= 4 && st.drawn != null) {
+    if (isMenzen(st, p) && st.scores[p] >= 1000 && st.wall.length >= 1 && st.drawn != null) {
       for (const t of o.discard) { c[t]--; if (shanten(c, nm) === 0) o.riichi.push(t); c[t]++; }
     }
     if (st.kans < 4 && st.wall.length > 0 && st.drawn != null) {
@@ -283,7 +316,7 @@
     const p = st.turn;
     const o = actOptions(st);
     if (!o || !o.discard.includes(t)) throw new Error('버릴 수 없는 패');
-    if (riichi) { if (!o.riichi.includes(t)) throw new Error('리치할 수 없음'); st.riichi[p] = true; st.pendingRiichi = p; st.ippatsu[p] = true; st.events.push({ type: 'riichi', p }); }
+    if (riichi) { if (!o.riichi.includes(t)) throw new Error('리치할 수 없음'); st.doubleRiichi[p] = st.rivers[p].length === 0 && !st.anyCall; st.riichi[p] = true; st.pendingRiichi = p; st.ippatsu[p] = true; st.events.push({ type: 'riichi', p }); }
     else if (st.riichi[p]) st.ippatsu[p] = false;                  // 리치 뒤 내 두 번째 버림부터 일발은 끝
     st.hands[p][t]--; st.rivers[p].push({ t, riichi: !!riichi, called: false });
     st.furiten[p] = false; st.noDiscard = []; st.drawn = null; st.rinshan = false;
@@ -326,17 +359,22 @@
     const order = [1, 2, 3].map((d) => (from + d) % 4).filter((q) => st.claims[q]);
     // 론을 안 한 사람은 후리텐(리치 중이면 영구)
     for (const q of order) if (st.claims[q].ron && choices[q] !== 'ron') { st.furiten[q] = true; if (st.riichi[q]) st.riichiFuriten[q] = true; }
-    const ron = order.find((q) => st.claims[q].ron && choices[q] === 'ron');
-    if (ron != null) {
-      if (st.pendingRiichi >= 0) { st.riichi[st.pendingRiichi] = false; st.pendingRiichi = -1; }   // 론당한 리치는 선언이 성립하지 않음
-      win(st, ron, false, from, t); return;
+    const rons = order.filter((q) => st.claims[q].ron && choices[q] === 'ron');   // 론이 여럿이면 모두 이긴다
+    if (st.pendingKan) {                                    // 창깡: 론이 없으면 깡을 마저 한다
+      const pk = st.pendingKan; st.pendingKan = null; st.claims = {};
+      if (rons.length) { win(st, rons, false, from, t, { chankan: true }); return; }
+      completeKan(st, pk.p, pk.t); return;
+    }
+    if (rons.length) {
+      if (st.pendingRiichi >= 0) { st.riichi[st.pendingRiichi] = false; st.doubleRiichi[st.pendingRiichi] = false; st.pendingRiichi = -1; }   // 론당한 리치는 선언이 성립하지 않음
+      win(st, rons, false, from, t); return;
     }
     const pon = order.find((q) => (choices[q] === 'pon' && st.claims[q].pon) || (choices[q] === 'kan' && st.claims[q].kan));
     const chi = order.find((q) => choices[q] && choices[q].chi && st.claims[q].chi && st.claims[q].chi.some((x) => x[0] === choices[q].chi[0] && x[1] === choices[q].chi[1]));
     const who = pon != null ? pon : chi;
     if (who == null) { advance(st); return; }
     commitRiichi(st);
-    st.ippatsu = [false, false, false, false];
+    st.ippatsu = [false, false, false, false]; st.anyCall = true;
     st.rivers[from][st.rivers[from].length - 1].called = true;
     const c = st.hands[who];
     const ch = choices[who];
@@ -356,7 +394,8 @@
       st.turn = who; st.drawn = null; st.phase = 'act'; st.rinshan = false;
       // 방금 부른 패와 같은 패, 반대쪽 끝 패는 바로 버리지 못한다(쿠이카에)
       const nd = [t];
-      if (t === tl[0] && tl[0] % 9 <= 5) nd.push(tl[0] + 3); if (t === tl[2] && tl[2] % 9 >= 3) nd.push(tl[2] - 3);
+      if (t === tl[0] && tl[0] % 9 <= 5) nd.push(tl[0] + 3);
+      if (t === tl[2] && tl[2] % 9 >= 3) nd.push(tl[2] - 3);
       st.noDiscard = nd.filter((x) => x >= 0 && x < 27);
       st.events.push({ type: 'call', p: who, kind: 'chi', t });
     }
@@ -373,43 +412,64 @@
     draw(st);
   }
 
-  // 암깡·가깡
+  // 암깡·가깡 (가깡은 다른 사람이 창깡으로 론할 수 있다)
   function kan(st, t) {
     const o = actOptions(st), p = st.turn;
     if (!o) throw new Error('지금은 깡 할 수 없음');
+    if (o.shouminkan.includes(t)) {
+      const claims = {};
+      for (let q = 0; q < 4; q++) {
+        if (q === p) continue;
+        if (!isFuriten(st, q) && waitsNow(st, q).includes(t) && evalWin(st, q, t, false, { chankan: true })) claims[q] = { ron: true };
+      }
+      if (Object.keys(claims).length) {
+        st.pendingKan = { p, t }; st.lastDiscard = { p, t, chankan: true }; st.claims = claims; st.phase = 'claim';
+        return;
+      }
+    } else if (!o.ankan.includes(t)) throw new Error('깡 할 수 없는 패');
+    completeKan(st, p, t);
+  }
+  function completeKan(st, p, t) {
     const c = st.hands[p];
-    if (o.ankan.includes(t)) { c[t] -= 4; st.melds[p].push({ kind: 'ankan', tiles: [t, t, t, t], from: -1, called: t }); }
-    else if (o.shouminkan.includes(t)) { c[t]--; const m = st.melds[p].find((x) => x.kind === 'pon' && x.tiles[0] === t); m.kind = 'minkan'; m.tiles = [t, t, t, t]; }
-    else throw new Error('깡 할 수 없는 패');
-    st.kans++; st.ippatsu = [false, false, false, false]; st.noDiscard = [];
+    if (c[t] === 4) { c[t] -= 4; st.melds[p].push({ kind: 'ankan', tiles: [t, t, t, t], from: -1, called: t }); }
+    else { c[t]--; const m = st.melds[p].find((x) => x.kind === 'pon' && x.tiles[0] === t); m.kind = 'minkan'; m.tiles = [t, t, t, t]; }
+    st.turn = p; st.kans++; st.ippatsu = [false, false, false, false]; st.noDiscard = []; st.anyCall = true; st.claims = {};
     st.events.push({ type: 'call', p, kind: 'kan', t });
     rinshanDraw(st); st.doraCount = Math.min(5, st.doraCount + 1); st.events.push({ type: 'dora' });
   }
   function tsumo(st) {
     const o = actOptions(st);
     if (!o || !o.tsumo) throw new Error('쯔모 할 수 없음');
-    win(st, st.turn, true, -1, st.drawn);
+    win(st, [st.turn], true, -1, st.drawn);
   }
 
   // ---------- 끝 ----------
-  function win(st, p, tsumoWin, from, tile) {
-    const r = evalWin(st, p, tile, tsumoWin);
-    const d = [0, 0, 0, 0];
-    const dealerWin = p === st.dealer;
-    let pts = r.pts;
-    if (tsumoWin) {
-      if (dealerWin) { const each = up100((pts * 1.5) / 3); for (let q = 0; q < 4; q++) if (q !== p) { d[q] -= each; d[p] += each; } }
-      else {
-        const dealerPay = up100(pts / 2), other = up100(pts / 4);
-        for (let q = 0; q < 4; q++) if (q !== p) { const pay = q === st.dealer ? dealerPay : other; d[q] -= pay; d[p] += pay; }
+  // 이긴 사람들(론이 여럿이면 모두)에게 점수를 준다. EMA 규칙: 본장 막대와 리치 막대는 따로 계산
+  function win(st, winners, tsumoWin, from, tile, extra) {
+    const d = [0, 0, 0, 0], wins = [];
+    for (const w of winners) {
+      const r = evalWin(st, w, tile, tsumoWin, extra);
+      const dealerWin = w === st.dealer, b = r.base, h = st.honba;
+      let gain = 0;
+      if (tsumoWin) {
+        for (let q = 0; q < 4; q++) {
+          if (q === w) continue;
+          const pay = up100(dealerWin || q === st.dealer ? 2 * b : b) + 100 * h;
+          d[q] -= pay; d[w] += pay; gain += pay;
+        }
+      } else {
+        gain = up100((dealerWin ? 6 : 4) * b) + 300 * h;
+        d[from] -= gain; d[w] += gain;
       }
-    } else {
-      if (dealerWin) pts = up100(pts * 1.5);
-      d[from] -= pts; d[p] += pts;
+      wins.push({ winner: w, han: r.han, fu: r.fu, yaku: r.yaku, yakuman: r.yakuman, dora: r.dora, ura: r.ura, base: r.base, pts: gain });
     }
-    d[p] += st.sticks * 1000; const sticksWon = st.sticks; st.sticks = 0;
+    // 리치 막대: 이긴 사람 중 리치한 사람은 자기 것을 되찾고, 나머지는 차례가 가장 빠른 사람이 가져간다
+    let pool = st.sticks * 1000;
+    for (const w of winners) if (st.riichi[w] && pool > 0) { d[w] += 1000; pool -= 1000; }
+    d[winners[0]] += pool;
+    const sticksWon = st.sticks; st.sticks = 0;
     for (let q = 0; q < 4; q++) st.scores[q] += d[q];
-    st.result = { type: 'win', winner: p, from, tsumo: tsumoWin, tile, han: r.han, yaku: r.yaku, yakuman: r.yakuman, dora: r.dora, ura: r.ura, pts: d[p] - sticksWon * 1000, deltas: d, sticks: sticksWon };
+    st.result = Object.assign({ type: 'win', winner: winners[0], winners, from, tsumo: tsumoWin, tile, deltas: d, sticks: sticksWon, wins }, wins[0], { winner: winners[0] });
     finishHand(st);
   }
   function exhaust(st) {
@@ -426,11 +486,16 @@
     st.results.push(st.result);
     st.events.push({ type: 'end', result: st.result });
   }
-  // 다음 판으로. 끝났으면 over
+  // 다음 판으로. 친이 이기거나 유국에 텐파이면 친이 그대로(본장 +1), 아니면 친이 넘어간다. 북 친이 끝나면 게임 끝
   function nextHand(st) {
     if (st.phase !== 'end') throw new Error('아직 판이 안 끝남');
-    st.hand++;
-    if (st.hand >= 4 || st.scores.some((s) => s < 0)) { st.over = true; st.phase = 'over'; st.events.push({ type: 'over' }); return; }
+    const r = st.result;
+    let repeat;
+    if (r.type === 'win') { repeat = r.winners.includes(st.dealer); st.honba = repeat ? st.honba + 1 : 0; }
+    else { repeat = r.tenpai[st.dealer]; st.honba++; }
+    st.played++;
+    if (!repeat) st.hand++;
+    if (st.hand >= 4) { st.over = true; st.phase = 'over'; st.events.push({ type: 'over' }); return; }
     startHand(st);
   }
   // 마지막 순위 (같은 점수는 먼저 앉은 사람이 위)
@@ -504,15 +569,16 @@
     if (o.chi) for (const ch of o.chi) { c[ch[0]]--; c[ch[1]]--; const after = shanten(c, nm + 1); c[ch[0]]++; c[ch[1]]++; if (after < before) return { chi: ch }; }
     return 'pass';
   }
-  // 컴퓨터가 낼 수 있는 한 수를 한 번 진행(사람이 아닌 차례일 때)
+  // 지금 차례인 사람(컴퓨터 또는 자리를 비운 사람)의 한 수를 컴퓨터가 대신 둔다
+  function aiPlay(st) {
+    const a = aiAct(st);
+    if (a.action === 'tsumo') tsumo(st);
+    else if (a.action === 'kan') kan(st, a.t);
+    else discard(st, a.t, a.riichi);
+  }
+  // 사람이 아닌 차례일 때 한 번 진행
   function aiStep(st, human) {
-    if (st.phase === 'act' && st.turn !== human) {
-      const a = aiAct(st);
-      if (a.action === 'tsumo') tsumo(st);
-      else if (a.action === 'kan') kan(st, a.t);
-      else discard(st, a.t, a.riichi);
-      return true;
-    }
+    if (st.phase === 'act' && st.turn !== human) { aiPlay(st); return true; }
     return false;
   }
   // 사람 말고 모두의 선택을 정해서 처리 (human 은 자기 선택을 주거나 null)
@@ -522,7 +588,17 @@
     resolveClaims(st, ch);
   }
 
+  // 판이 끝났을 때 이긴 사람(과 유국의 텐파이 사람)의 손패를 결과에 붙여 공개한다
+  function withReveal(st) {
+    const r = st.result; if (!r) return null;
+    const reveal = {};
+    const show = (p, tile) => { const c = st.hands[p].slice(); if (tile != null) c[tile]++; reveal[p] = { hand: c, melds: st.melds[p].map((m) => ({ kind: m.kind, tiles: m.tiles })) }; };
+    if (r.type === 'win') r.winners.forEach((w) => show(w, r.tsumo ? null : r.tile));
+    else r.tenpai.forEach((t, p) => { if (t) show(p, null); });
+    return Object.assign({}, r, { reveal });
+  }
+
   const api = { rng, tileName, isHonor, isTerm, isSimple, decompose, isAgari, isChiitoi, isKokushi, shanten, regularShanten, waitsOf, scoreHand, nextDora, HAN_PTS,
-    newGame, startHand, ranking, actOptions, discard, kan, tsumo, resolveClaims, claimOptions, nextHand, aiAct, aiClaim, aiStep, settleClaims, aiDiscard, evalWin, isFuriten, waitsNow, seatWind, doraIndicators, doraTiles, uraTiles, isMenzen, counts };
+    newGame, startHand, ranking, withReveal, actOptions, discard, kan, tsumo, resolveClaims, claimOptions, nextHand, aiAct, aiPlay, aiClaim, aiStep, settleClaims, aiDiscard, evalWin, isFuriten, waitsNow, seatWind, doraIndicators, doraTiles, uraTiles, isMenzen, counts };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LOGIC_MJ = api;
 })(typeof window !== 'undefined' ? window : globalThis);

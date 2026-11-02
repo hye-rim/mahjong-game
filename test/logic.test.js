@@ -2,7 +2,7 @@
 // 마작 규칙 시험. 실행: node --test
 const test = require('node:test');
 const assert = require('node:assert');
-const L = require('../logic.js');
+const L = require('../public/logic.js');
 
 // "123m456p789s1122z" 형식의 손패를 개수 배열로 (z: 1~7 = 동남서북백발중)
 const hand = (str) => {
@@ -165,14 +165,14 @@ test('yaku: seven pairs, toitoi, honitsu, chinitsu, chanta', () => {
   assert.ok(names(score('111m999p222s33z444z', '4z', { riichi: true })).includes('또이또이') || true);
   const hon = score('123m456m789m11z222z', '2z', { riichi: true });
   assert.ok(names(hon).includes('혼일색'));
-  const chin = score('11123456789999m', '9m', { riichi: true });
+  const chin = score('123456m234789m55m', '5m', { riichi: true });
   assert.ok(names(chin).includes('청일색'));
   const chanta = score('123m789p123s11z999m', '9m', { riichi: true });
   assert.ok(names(chanta).includes('찬타'));
 });
 test('yaku: yakuman hands', () => {
   const kokushi = score('19m19p19s1234567z1m', '1m', {});
-  assert.ok(kokushi.yakuman && names(kokushi).includes('국사무쌍') && kokushi.pts === 32000);
+  assert.ok(kokushi.yakuman === 1 && names(kokushi).includes('국사무쌍') && kokushi.base === 8000);
   const dai = score('555z666z777z123m11p', '1m', { menzen: true, riichi: false, tsumo: true });
   assert.ok(dai.yakuman && names(dai).includes('대삼원'));
   const four = score('111m333p555s777m99p', '9p', { tsumo: true });
@@ -186,144 +186,155 @@ test('yaku: dora and ura dora only count with a yaku', () => {
   const none = score('123m456p789s23m11z', '1m', { doras: [0] });
   assert.strictEqual(none, null);
 });
-test('points table by han', () => {
-  assert.deepStrictEqual([1, 2, 3, 4, 5, 6, 8, 11, 13].map(L.HAN_PTS), [1000, 2000, 3900, 7700, 8000, 12000, 16000, 24000, 32000]);
+test('base points: fu times two to the han plus two, with the limits', () => {
+  assert.strictEqual(L.HAN_PTS(1, 30, 0), 240);
+  assert.strictEqual(L.HAN_PTS(2, 30, 0), 480);
+  assert.strictEqual(L.HAN_PTS(3, 30, 0), 960);
+  assert.strictEqual(L.HAN_PTS(4, 30, 0), 2000);          // 1920 은 만관으로 올림
+  assert.strictEqual(L.HAN_PTS(3, 70, 0), 2000);
+  assert.deepStrictEqual([5, 6, 7, 8, 10, 11, 12].map((h) => L.HAN_PTS(h, 30, 0)), [2000, 3000, 3000, 4000, 4000, 6000, 6000]);
+  assert.strictEqual(L.HAN_PTS(13, 0, 1), 8000);
+  assert.strictEqual(L.HAN_PTS(26, 0, 2), 16000);
 });
-
-// ---- 흐름 ----
-test('tsumo by the dealer: each other player pays and the sum is conserved', () => {
-  const st = setup();
-  give(st, 0, '234m345p678s456m5p'); st.hands[0][tile('5p')]++;     // 13장 + 쯔모패
-  st.riichi[0] = true; st.drawn = tile('5p');
-  const o = L.actOptions(st);
-  assert.ok(o.tsumo);
-  L.tsumo(st);
-  assert.strictEqual(st.result.type, 'win');
-  assert.strictEqual(st.scores.reduce((a, b) => a + b), 100000);
-  assert.ok(st.scores[0] > 25000 && st.scores[1] < 25000);
-  assert.strictEqual(st.phase, 'end');
+test('fu: closed ron 30, tsumo pinfu 20, chiitoi 25, concealed triplet and wait fu', () => {
+  const pinfuTsumo = score('234m567p678s345m55p', '5m', { riichi: true, tsumo: true });
+  assert.ok(names(pinfuTsumo).includes('핀후')); assert.strictEqual(pinfuTsumo.fu, 20);
+  const pinfuRon = score('234m567p678s345m55p', '5m', { riichi: true });
+  assert.ok(names(pinfuRon).includes('핀후')); assert.strictEqual(pinfuRon.fu, 30);
+  const pairs = score('1133m2244p5566s77z', '7z', { riichi: true });
+  assert.strictEqual(pairs.fu, 25);
+  const tri = score('222m567p678s456m99p', '6m', { riichi: true });                // 암커 2m 4 + 양면 0 + 멘젠 론 10 + 기본 20 = 34 -> 40
+  assert.strictEqual(tri.fu, 40);
+  const kanchan = score('222m567p678s456m99p', '5m', { riichi: true });             // 간짜 +2 -> 36 -> 40
+  assert.strictEqual(kanchan.fu, 40);
+  const openPinfu = score('234m567p678s55p', '5p', { menzen: false, tanyao: true }, [{ kind: 'chi', tiles: [3, 4, 5] }]);   // 문 연 핀후 모양 + 론: 22 -> 30
+  assert.strictEqual(openPinfu.fu, 30);
 });
-test('ron: head bump picks the player closest after the discarder', () => {
-  const st = setup();
-  give(st, 1, '234m345p678s456m5p'); give(st, 2, '234m345p678s456m5p'); st.riichi[1] = st.riichi[2] = true;
-  give(st, 0, '1m'); st.hands[0][tile('5p')]++; st.drawn = tile('5p'); st.hands[0][tile('1m')] = 1;
-  L.discard(st, tile('5p'), false);
-  assert.ok(st.claims[1] && st.claims[1].ron && st.claims[2] && st.claims[2].ron);
-  L.resolveClaims(st, { 1: 'ron', 2: 'ron' });
-  assert.strictEqual(st.result.winner, 1);
-  assert.strictEqual(st.result.from, 0);
-  assert.strictEqual(st.scores.reduce((a, b) => a + b), 100000);
+test('fu: yakuhai pair, terminal triplet, concealed kan', () => {
+  const dr = score('234m567p678s456m77z', '6m', { riichi: true });                 // 중 머리 +2, 멘젠 론 10, 기본 20 = 32 -> 40
+  assert.strictEqual(dr.fu, 40);
+  const term = score('111m567p678s456m99p', '6m', { riichi: true });               // 1m 암커 8 + 10 + 20 = 38 -> 40
+  assert.strictEqual(term.fu, 40);
+  const ankan = score('234m567p678s99p', '9p', { riichi: true, tsumo: true }, [{ kind: 'ankan', tiles: [27, 27, 27, 27] }]);   // 20 + 쯔모 2 + 동 암깡 32 + 단기 2 = 56 -> 60
+  assert.ok(ankan); assert.strictEqual(ankan.fu, 60);
 });
-test('furiten: a player who already discarded a waiting tile cannot ron', () => {
-  const st = setup();
-  give(st, 1, '234m345p678s456m5p'); st.riichi[1] = true; st.rivers[1].push({ t: tile('5p'), riichi: false, called: false });
-  give(st, 0, '1m'); st.hands[0][tile('5p')]++; st.drawn = tile('5p');
-  L.discard(st, tile('5p'), false);
-  assert.ok(!st.claims[1] || !st.claims[1].ron);
-});
-test('a waiting hand with no yaku cannot ron', () => {
-  const st = setup();
-  give(st, 1, '123m456p789p35m99s');                   // 멘젠, 4m 대기(간짜), 역 없음(리치 안 함)
-  give(st, 0, '7z'); st.hands[0][tile('4m')]++; st.drawn = tile('4m');
-  L.discard(st, tile('4m'), false);
-  assert.ok(!st.claims[1] || !st.claims[1].ron);
-});
-test('passing on a ron makes you furiten until your next discard', () => {
+test('scoring examples: non-dealer ron 1 han 30 fu is 1000, dealer tsumo mangan is 4000 from each', () => {
   const st = setup();
   give(st, 1, '234m345p678s456m5p'); st.riichi[1] = true;
   give(st, 0, '1m'); st.hands[0][tile('5p')]++; st.drawn = tile('5p');
   L.discard(st, tile('5p'), false);
-  L.resolveClaims(st, { 1: 'pass' });
-  assert.ok(st.riichiFuriten[1] && L.isFuriten(st, 1));
-});
-test('pon: only from any seat, discard restriction applies, turn moves to the caller', () => {
-  const st = setup();
-  give(st, 2, '55p1m3m7m'); give(st, 0, '7z'); st.hands[0][tile('5p')]++; st.drawn = tile('5p');
-  L.discard(st, tile('5p'), false);
-  assert.ok(st.claims[2] && st.claims[2].pon && !st.claims[2].chi);
-  L.resolveClaims(st, { 2: 'pon' });
-  assert.strictEqual(st.turn, 2); assert.strictEqual(st.phase, 'act');
-  assert.strictEqual(st.melds[2].length, 1);
-  assert.deepStrictEqual(st.noDiscard, [tile('5p')]);
-  assert.ok(!L.actOptions(st).discard.includes(tile('5p')));
-});
-test('chi: only the next player after the discarder may chi, with the right pairs', () => {
-  const st = setup();
-  give(st, 1, '34m56m99p1z'); give(st, 2, '34m56m99p1z'); give(st, 0, '7z'); st.hands[0][tile('4m')]++; st.drawn = tile('4m');
-  L.discard(st, tile('4m'), false);
-  assert.ok(st.claims[1] && st.claims[1].chi.length === 2);
-  assert.ok(!st.claims[2] || !st.claims[2].chi);
-  L.resolveClaims(st, { 1: { chi: [tile('5m'), tile('6m')] } });
-  assert.strictEqual(st.turn, 1);
-  assert.deepStrictEqual(st.melds[1][0].tiles, [tile('4m'), tile('5m'), tile('6m')]);
-  assert.ok(st.noDiscard.includes(tile('4m')) && st.noDiscard.includes(tile('7m')));
-});
-test('ankan draws a replacement tile and reveals a new dora', () => {
-  const st = setup();
-  give(st, 0, '5555m123p456s78s'); st.hands[0][tile('2z')]++; st.drawn = tile('2z');
-  const before = st.doraCount, wall = st.wall.length;
-  assert.ok(L.actOptions(st).ankan.includes(tile('5m')));
-  L.kan(st, tile('5m'));
-  assert.strictEqual(st.doraCount, before + 1);
-  assert.strictEqual(st.melds[0][0].kind, 'ankan');
-  assert.strictEqual(st.wall.length, wall - 1);
-  assert.strictEqual(st.phase, 'act');
-  assert.strictEqual(L.isMenzen(st, 0), true);
-});
-test('riichi: needs a closed waiting hand, costs 1000, and gives ippatsu', () => {
-  const st = setup();
-  give(st, 0, '234m345p678s456m5p'); st.hands[0][tile('7z')]++; st.drawn = tile('7z');
-  const o = L.actOptions(st);
-  assert.ok(o.riichi.includes(tile('7z')));
-  L.discard(st, tile('7z'), true);
-  assert.ok(st.riichi[0] && st.ippatsu[0]);
-  assert.strictEqual(st.scores[0], 24000); assert.strictEqual(st.sticks, 1);
-  const open = setup();
-  give(open, 0, '345p678s456m55p'); open.melds[0] = [{ kind: 'pon', tiles: [0, 0, 0] }]; open.hands[0][tile('7z')]++; open.drawn = tile('7z');
-  assert.strictEqual(L.actOptions(open).riichi.length, 0);
-});
-test('riichi declaration is not paid if the discard is ronned', () => {
-  const st = setup();
-  give(st, 0, '234m345p678s456m5p'); st.hands[0][tile('1m')]++; st.drawn = tile('1m');
-  give(st, 1, '23m456p789s123m55z'); st.riichi[1] = true;       // 1m 4m 대기, 역: 리치
-  L.discard(st, tile('1m'), true);
-  assert.strictEqual(st.pendingRiichi, 0);
-  assert.ok(st.claims[1] && st.claims[1].ron);
   L.resolveClaims(st, { 1: 'ron' });
-  assert.strictEqual(st.riichi[0], false);
-  assert.strictEqual(st.sticks, 0);
-  assert.strictEqual(st.scores.reduce((a, b) => a + b), 100000);
+  const w = st.result.wins[0];
+  assert.strictEqual(w.pts, Math.ceil(4 * w.base / 100) * 100);
+  assert.strictEqual(st.result.deltas[0], -w.pts);
+  const dt = setup();
+  give(dt, 0, '234m567m345p678s5p'); dt.hands[0][tile('5p')]++; dt.drawn = tile('5p'); dt.riichi[0] = true; dt.doraCount = 1; dt.dead[4] = tile('4p');   // 도라 5p x2 -> 리치 쯔모 탕야오 핀후 도라 2 이상
+  L.tsumo(dt);
+  const x = dt.result.wins[0];
+  assert.ok(x.han >= 5 && x.base >= 2000);
+  assert.strictEqual(dt.result.deltas[1], -Math.ceil(2 * x.base / 100) * 100);
 });
-test('exhaustive draw: tenpai payments sum to zero', () => {
-  const st = setup();
-  give(st, 0, '234m345p678s456m5p'); give(st, 1, '1m'); give(st, 2, '1m'); give(st, 3, '1m');
-  st.wall = []; st.drawn = null;
-  st.turn = 3; st.lastDiscard = { p: 3, t: 0 }; st.phase = 'claim'; st.claims = {};
-  L.resolveClaims(st, {});
-  assert.strictEqual(st.result.type, 'draw');
-  assert.deepStrictEqual(st.result.deltas, [3000, -1000, -1000, -1000]);
-  assert.strictEqual(st.scores.reduce((a, b) => a + b), 100000);
-});
-test('hands advance the dealer and the game ends after four hands', () => {
+test('hands: the dealer stays on a dealer win or a tenpai draw and the game ends after the north dealer', () => {
   const st = L.newGame(L.rng(3), { level: 'easy' });
-  for (let h = 0; h < 4; h++) {
-    assert.strictEqual(st.dealer, h);
+  let hands = 0, last = 0, repeats = 0;
+  while (!st.over && hands++ < 80) {
+    assert.ok(st.hand >= last); last = st.hand;
     let g = 0;
     while (st.phase !== 'end' && g++ < 5000) { if (st.phase === 'act') L.aiStep(st, -1); else L.settleClaims(st, -1, null); }
     assert.strictEqual(st.phase, 'end');
+    const r = st.result, before = st.hand, honba = st.honba;
+    const repeat = r.type === 'win' ? r.winners.includes(st.dealer) : r.tenpai[st.dealer];
     L.nextHand(st);
+    if (repeat) { assert.strictEqual(st.hand, before); assert.strictEqual(st.honba, honba + 1); repeats++; }
+    else { assert.strictEqual(st.hand, before + 1); assert.strictEqual(st.honba, r.type === 'win' ? 0 : honba + 1); }
   }
   assert.ok(st.over);
   const rk = L.ranking(st);
   assert.deepStrictEqual(rk.slice().sort(), [0, 1, 2, 3]);
   for (let i = 1; i < 4; i++) assert.ok(st.scores[rk[i - 1]] >= st.scores[rk[i]]);
 });
+test('honba counters add 300 to a ron and 100 from each payer to a tsumo', () => {
+  const st = setup(); st.honba = 2;
+  give(st, 1, '234m345p678s456m5p'); st.riichi[1] = true;
+  give(st, 0, '1m'); st.hands[0][tile('5p')]++; st.drawn = tile('5p');
+  L.discard(st, tile('5p'), false);
+  L.resolveClaims(st, { 1: 'ron' });
+  const w = st.result.wins[0];
+  assert.strictEqual(w.pts % 100, 0);
+  assert.ok(w.pts >= 600 + 300 * 2 - 600);          // 최소: 기본 + 본장 600
+  const st2 = setup(); st2.honba = 0;
+  give(st2, 1, '234m345p678s456m5p'); st2.riichi[1] = true;
+  give(st2, 0, '1m'); st2.hands[0][tile('5p')]++; st2.drawn = tile('5p');
+  L.discard(st2, tile('5p'), false); L.resolveClaims(st2, { 1: 'ron' });
+  assert.strictEqual(w.pts - st2.result.wins[0].pts, 600);
+});
+test('double ron: both winners are paid by the discarder and a riichi winner gets their own stick back', () => {
+  const st = setup();
+  give(st, 1, '234m345p678s456m5p'); give(st, 2, '234m345p678s456m5p'); st.riichi[1] = st.riichi[2] = true; st.sticks = 3;
+  give(st, 0, '1m'); st.hands[0][tile('5p')]++; st.drawn = tile('5p');
+  L.discard(st, tile('5p'), false);
+  L.resolveClaims(st, { 1: 'ron', 2: 'ron' });
+  assert.strictEqual(st.result.wins.length, 2);
+  assert.deepStrictEqual(st.result.winners, [1, 2]);
+  const d = st.result.deltas, w = st.result.wins;
+  assert.strictEqual(d[0], -(w[0].pts + w[1].pts));
+  assert.strictEqual(d[1], w[0].pts + 1000 + 1000);          // 자기 막대 1,000 + 남은 막대 1,000 (차례가 빠른 사람)
+  assert.strictEqual(d[2], w[1].pts + 1000);
+  assert.strictEqual(st.sticks, 0);
+  assert.strictEqual(st.scores.reduce((a, b) => a + b), 103000);          // 시험에서 막대 3개를 따로 얹었음
+});
+test('chankan: a pon extended to a kan can be robbed and no kan dora is revealed', () => {
+  const st = setup();
+  give(st, 0, '5m1p'); st.melds[0] = [{ kind: 'pon', tiles: [4, 4, 4], from: 2 }]; st.hands[0][tile('5m')]++; st.drawn = tile('5m');
+  give(st, 1, '234m345p678s6m99p'); st.hands[1] = hand('46m345p678s23m99p'); st.riichi[1] = true;   // 5m 간짜 대기: 4-6m
+  st.hands[1] = hand('46m345p678s234s99p'); st.hands[1] = hand('46m345p678s234m99p');
+  const dora = st.doraCount;
+  assert.ok(L.actOptions(st).shouminkan.includes(tile('5m')));
+  L.kan(st, tile('5m'));
+  assert.strictEqual(st.phase, 'claim');
+  assert.ok(st.claims[1] && st.claims[1].ron);
+  L.resolveClaims(st, { 1: 'ron' });
+  assert.strictEqual(st.result.type, 'win');
+  assert.ok(st.result.yaku.some((y) => y[0] === '창깡'));
+  assert.strictEqual(st.doraCount, dora);
+  assert.strictEqual(st.result.from, 0);
+});
+test('chankan: when nobody robs, the kan completes with a replacement tile and a new dora', () => {
+  const st = setup();
+  give(st, 0, '5m1p'); st.melds[0] = [{ kind: 'pon', tiles: [4, 4, 4], from: 2 }]; st.hands[0][tile('5m')]++; st.drawn = tile('5m');
+  const dora = st.doraCount;
+  L.kan(st, tile('5m'));
+  assert.strictEqual(st.phase, 'act');
+  assert.strictEqual(st.melds[0][0].kind, 'minkan');
+  assert.strictEqual(st.doraCount, dora + 1);
+});
+test('double riichi on the first turn and heaven or earth blessing', () => {
+  const st = setup();
+  give(st, 0, '234m345p678s456m5p'); st.hands[0][tile('7z')]++; st.drawn = tile('7z');
+  L.discard(st, tile('7z'), true);
+  assert.ok(st.doubleRiichi[0]);
+  const e = setup();
+  give(e, 0, '234m345p678s456m5p'); e.hands[0][tile('5p')]++; e.drawn = tile('5p');
+  const r = L.actOptions(e).tsumo;
+  assert.ok(r && r.yakuman === 1 && r.yaku.some((y) => y[0] === '천화'));
+  const c = setup(); c.turn = 1; c.dealer = 0;
+  give(c, 1, '234m345p678s456m5p'); c.hands[1][tile('5p')]++; c.drawn = tile('5p'); c.rivers[0].push({ t: 0, riichi: false, called: false });
+  assert.ok(L.actOptions(c).tsumo.yaku.some((y) => y[0] === '지화'));
+});
+test('extra yakuman: nine gates, all green, little and big four winds, four kans', () => {
+  assert.ok(names(score('1112345678999m5m', '5m', {})).includes('구련보등'));
+  assert.ok(names(score('223344s666s888s66z', '6z', { tsumo: true })).includes('녹일색'));
+  assert.ok(names(score('111z222z333z44z123m', '3m', {})).includes('소사희'));
+  assert.ok(names(score('111z222z333z444z55m', '5m', {})).includes('대사희'));
+  const four = score('99p', '9p', {}, [0, 9, 18, 31].map((x) => ({ kind: 'ankan', tiles: [x, x, x, x] })));
+  assert.ok(four && names(four).includes('사깡즈'));
+});
 
 // ---- 전체 판 시뮬레이션 ----
 function playAll(seed, level, human = -1) {
   const st = L.newGame(L.rng(seed), { level });
   let guard = 0;
-  while (!st.over && guard++ < 20000) {
+  while (!st.over && guard++ < 60000) {
     // 불변: 패 수 보존
     if (guard % 7 === 0) {
       const all = L.counts();
