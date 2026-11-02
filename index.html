@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>마작</title>
+<style>
+  *, *::before, *::after { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0b2a1c; color:#fff; font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif; }
+  #stage { width:100%; height:100%; display:flex; justify-content:center; }
+  #wrap { position:relative; width:100%; max-width:440px; height:100%; display:flex; flex-direction:column; gap:5px; padding:6px 7px max(8px, env(safe-area-inset-bottom)); background:radial-gradient(circle at 50% 35%, #1a6b45, #0b2a1c 75%); }
+  :root { --tw:min(26px, calc((100vw - 26px) / 14.6)); }
+  /* 패 */
+  .t { display:inline-flex; flex-direction:column; align-items:center; justify-content:center; width:var(--tw); height:calc(var(--tw) * 1.5); background:linear-gradient(180deg,#fffef6,#ece6cf); border-radius:4px; box-shadow:0 2px 0 #b6ad8c, 0 0 0 1px rgba(0,0,0,.25); color:#222; font-weight:900; line-height:1; flex:none; }
+  .t b { font-size:calc(var(--tw) * .62); } .t i { font-style:normal; font-size:calc(var(--tw) * .4); margin-top:1px; }
+  .t.m { color:#c0392b; } .t.p { color:#1e62c8; } .t.s { color:#17884a; }
+  .t.h b { font-size:calc(var(--tw) * .72); } .t.d1 { color:#777; } .t.d2 { color:#17884a; } .t.d3 { color:#c0392b; }
+  .t.back { background:linear-gradient(180deg,#2c8a5a,#176343); box-shadow:0 2px 0 #0b3a26; }
+  .t.sm { width:calc(var(--tw) * .72); height:calc(var(--tw) * 1.05); border-radius:3px; box-shadow:0 1px 0 #b6ad8c, 0 0 0 1px rgba(0,0,0,.25); }
+  .t.sm b { font-size:calc(var(--tw) * .44); } .t.sm i { font-size:calc(var(--tw) * .28); } .t.sm.h b { font-size:calc(var(--tw) * .5); }
+  .t.xs { width:calc(var(--tw) * .6); height:calc(var(--tw) * .88); border-radius:2px; box-shadow:0 1px 0 #b6ad8c; }
+  .t.xs b { font-size:calc(var(--tw) * .38); } .t.xs i { font-size:calc(var(--tw) * .24); } .t.xs.h b { font-size:calc(var(--tw) * .42); }
+  .t.hint { outline:3px solid #ffd23a; outline-offset:1px; }
+  .t.called { opacity:.35; } .t.rt { outline:2px solid #ffd23a; } .t.dis { filter:brightness(.55); }
+  /* 윗줄 */
+  #bar { display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:800; padding-right:76px; min-height:28px; gap:6px; }
+  #dora { display:flex; align-items:center; gap:2px; } #dora small { font-size:10px; opacity:.8; margin-right:2px; }
+  /* 강 */
+  #table { display:grid; grid-template-columns:1fr 1fr; gap:5px; flex:1 1 auto; min-height:0; align-content:start; }
+  .pn { background:rgba(0,0,0,.22); border-radius:9px; padding:4px 5px; display:flex; flex-direction:column; gap:3px; border:2px solid transparent; min-height:50px; }
+  .pn.top { grid-column:1 / 3; } .pn.turn { border-color:#ffd23a; }
+  .pn .hd { display:flex; justify-content:space-between; align-items:center; font-size:11px; font-weight:800; gap:4px; }
+  .pn .hd .rc { background:#e0453a; border-radius:6px; padding:0 5px; font-size:10px; } .pn .hd .sc { opacity:.9; font-weight:700; }
+  .pn .river { display:flex; flex-wrap:wrap; gap:1px; align-content:flex-start; } .pn .melds { display:flex; flex-wrap:wrap; gap:4px; } .pn .melds span { display:inline-flex; gap:1px; }
+  /* 내 손 */
+  #mine { display:flex; flex-direction:column; gap:4px; }
+  #hand { display:flex; align-items:flex-end; justify-content:center; gap:1px; min-height:calc(var(--tw) * 1.5 + 8px); }
+  #hand .t { cursor:pointer; position:relative; transition:transform .08s; } #hand .t.sel { transform:translateY(-8px); box-shadow:0 2px 0 #b6ad8c, 0 0 0 2px #ffd23a; }
+  #hand .gap { width:7px; flex:none; }
+  #myMelds { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; min-height:0; } #myMelds span { display:inline-flex; gap:1px; }
+  #msg { min-height:30px; font-size:12px; font-weight:700; text-align:center; color:#d6f3e0; line-height:1.35; display:flex; align-items:center; justify-content:center; }
+  #acts { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; min-height:44px; }
+  #acts button { min-width:64px; flex:1 1 64px; max-width:120px; min-height:44px; border-radius:12px; border:2px solid rgba(255,255,255,.3); background:rgba(255,255,255,.12); color:#fff; font-size:14px; font-weight:900; touch-action:manipulation; padding:2px 6px; line-height:1.2; }
+  #acts button small { display:block; font-size:10px; font-weight:600; opacity:.85; }
+  #acts button.go { background:linear-gradient(180deg,#fff2b8,#ffc83a); color:#3a2400; border-color:#ffc83a; }
+  #acts button.warn { background:linear-gradient(180deg,#ff9a8a,#e0453a); border-color:#e0453a; }
+  #acts button.on { outline:3px solid #ffd23a; }
+  #acts .t { margin:0 1px; }
+  /* 겹쳐 보이는 화면 */
+  #overlay { position:absolute; inset:0; z-index:6; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; text-align:center; padding:14px; background:rgba(5,14,10,.88); overflow-y:auto; }
+  #overlay.hidden { display:none; }
+  #overlay h1 { font-size:44px; font-weight:900; color:#ffd23a; text-shadow:0 3px 0 #7a5500; } #overlay h2 { font-size:24px; font-weight:900; }
+  #overlay p { font-size:13px; color:#e6e6e6; line-height:1.6; } #overlay .big { font-size:20px; font-weight:800; color:#ffd23a; }
+  #overlay .help { font-size:12px; color:#bdbdbd; line-height:1.7; } #overlay .note { font-size:11px; color:#aab; }
+  #overlay button { margin-top:6px; background:linear-gradient(180deg,#fff2b8,#ffc83a); color:#3a2400; font-weight:900; font-size:17px; border:none; border-radius:999px; padding:12px 34px; box-shadow:0 4px 0 #9a6a00; cursor:pointer; }
+  #overlay button:active { transform:translateY(3px); box-shadow:0 1px 0 #9a6a00; }
+  #overlay .lv { display:flex; gap:10px; margin-top:6px; } #overlay .lv button { margin-top:0; padding:10px 18px; font-size:16px; } #overlay .lv small { display:block; font-size:10px; font-weight:600; opacity:.75; margin-top:2px; }
+  #overlay .hl { display:flex; flex-wrap:wrap; gap:1px; justify-content:center; max-width:100%; } #overlay .hl .gap { width:8px; }
+  #overlay table { border-collapse:collapse; font-size:13px; margin:2px auto; } #overlay td { padding:2px 8px; } #overlay td.n { text-align:right; font-weight:800; } .plus { color:#8cf0a8; } .minus { color:#ff9a8a; }
+  #overlay .yk { display:flex; flex-wrap:wrap; gap:5px; justify-content:center; } #overlay .yk span { background:rgba(255,255,255,.14); border-radius:8px; padding:3px 8px; font-size:12px; font-weight:800; }
+  #top { position:fixed; right:6px; top:6px; display:flex; gap:6px; z-index:7; }
+  #top button { position:relative; background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.3); color:#fff; width:32px; height:32px; border-radius:8px; font-size:14px; cursor:pointer; }
+  #top button::after { content:''; position:absolute; inset:-6px -3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <div id="bar"><span id="info"></span><span id="dora"></span></div>
+  <div id="table"></div>
+  <div id="mine"><div id="myMelds"></div><div id="hand"></div></div>
+  <div id="msg"></div>
+  <div id="acts"></div>
+  <div id="overlay"></div>
+</div></div>
+<div id="top"><button id="muteBtn" title="소리 (M)">🔊</button><button id="pauseBtn" title="일시정지 (P)">⏸</button></div>
+<script src="logic.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
